@@ -42,7 +42,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 
 @asyncio.coroutine
 def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
-    """Set up the microsoft face identify platform."""
+    """Set up the Microsoft Face identify platform."""
     api = hass.data[DATA_MICROSOFT_FACE]
     face_group = config[CONF_GROUP]
     confidence = config[CONF_CONFIDENCE]
@@ -54,7 +54,7 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
             camera.get(CONF_NAME)
         ))
 
-    yield from async_add_devices(entities)
+    async_add_devices(entities)
 
 
 class ImageProcessingFaceEntity(ImageProcessingEntity):
@@ -91,6 +91,11 @@ class ImageProcessingFaceEntity(ImageProcessingEntity):
         return state
 
     @property
+    def device_class(self):
+        """Return the class of this device, from component DEVICE_CLASSES."""
+        return 'face'
+
+    @property
     def state_attributes(self):
         """Return device specific state attributes."""
         attr = {
@@ -103,8 +108,7 @@ class ImageProcessingFaceEntity(ImageProcessingEntity):
     def process_faces(self, faces, total):
         """Send event with detected faces and store data."""
         run_callback_threadsafe(
-            self.hass.loop, self.async_process_faces, faces, total
-        ).result()
+            self.hass.loop, self.async_process_faces, faces, total).result()
 
     @callback
     def async_process_faces(self, faces, total):
@@ -141,10 +145,10 @@ class ImageProcessingFaceEntity(ImageProcessingEntity):
 
 
 class MicrosoftFaceIdentifyEntity(ImageProcessingFaceEntity):
-    """Microsoft face api entity for identify."""
+    """Representation of the Microsoft Face API entity for identify."""
 
     def __init__(self, camera_entity, api, face_group, confidence, name=None):
-        """Initialize openalpr local api."""
+        """Initialize the Microsoft Face API."""
         super().__init__()
 
         self._api = api
@@ -193,7 +197,7 @@ class MicrosoftFaceIdentifyEntity(ImageProcessingFaceEntity):
                 {'faceIds': face_ids, 'personGroupId': self._face_group})
 
         except HomeAssistantError as err:
-            _LOGGER.error("Can't process image on microsoft face: %s", err)
+            _LOGGER.error("Can't process image on Microsoft face: %s", err)
             return
 
         # parse data
@@ -201,7 +205,7 @@ class MicrosoftFaceIdentifyEntity(ImageProcessingFaceEntity):
         total = 0
         for face in detect:
             total += 1
-            if len(face['candidates']) == 0:
+            if not face['candidates']:
                 continue
 
             data = face['candidates'][0]

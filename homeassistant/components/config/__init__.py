@@ -6,7 +6,7 @@ import voluptuous as vol
 
 from homeassistant.core import callback
 from homeassistant.const import EVENT_COMPONENT_LOADED
-from homeassistant.bootstrap import (
+from homeassistant.setup import (
     async_prepare_setup_platform, ATTR_COMPONENT)
 from homeassistant.components.frontend import register_built_in_panel
 from homeassistant.components.http import HomeAssistantView
@@ -20,14 +20,14 @@ ON_DEMAND = ('zwave', )
 
 @asyncio.coroutine
 def async_setup(hass, config):
-    """Setup the config component."""
+    """Set up the config component."""
     register_built_in_panel(hass, 'config', 'Configuration', 'mdi:settings')
 
     @asyncio.coroutine
     def setup_panel(panel_name):
-        """Setup a panel."""
-        panel = yield from async_prepare_setup_platform(hass, config, DOMAIN,
-                                                        panel_name)
+        """Set up a panel."""
+        panel = yield from async_prepare_setup_platform(
+            hass, config, DOMAIN, panel_name)
 
         if not panel:
             return
@@ -129,5 +129,8 @@ def _read(path):
 
 def _write(path, data):
     """Write YAML helper."""
+    # Do it before opening file. If dump causes error it will now not
+    # truncate the file.
+    data = dump(data)
     with open(path, 'w', encoding='utf-8') as outfile:
-        outfile.write(dump(data))
+        outfile.write(data)

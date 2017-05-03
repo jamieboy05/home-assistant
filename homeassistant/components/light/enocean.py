@@ -34,7 +34,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the EnOcean light platform."""
+    """Set up the EnOcean light platform."""
     sender_id = config.get(CONF_SENDER_ID)
     devname = config.get(CONF_NAME)
     dev_id = config.get(CONF_ID)
@@ -106,4 +106,4 @@ class EnOceanLight(enocean.EnOceanDevice, Light):
         """Update the internal state of this device."""
         self._brightness = math.floor(val / 100.0 * 256.0)
         self._on_state = bool(val != 0)
-        self.update_ha_state()
+        self.schedule_update_ha_state()

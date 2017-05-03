@@ -15,7 +15,7 @@ from homeassistant.const import (
 from homeassistant.helpers.entity import Entity
 import homeassistant.helpers.config_validation as cv
 
-REQUIREMENTS = ['python-wink==1.1.1', 'pubnubsub-handler==1.0.1']
+REQUIREMENTS = ['python-wink==1.2.3', 'pubnubsub-handler==1.0.2']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ CONFIG_SCHEMA = vol.Schema({
 
 WINK_COMPONENTS = [
     'binary_sensor', 'sensor', 'light', 'switch', 'lock', 'cover', 'climate',
-    'fan', 'alarm_control_panel'
+    'fan', 'alarm_control_panel', 'scene'
 ]
 
 
@@ -115,12 +115,12 @@ def setup(hass, config):
         """Force all devices to poll the Wink API."""
         _LOGGER.info("Refreshing Wink states from API")
         for entity in hass.data[DOMAIN]['entities']:
-            entity.update_ha_state(True)
+            entity.schedule_update_ha_state(True)
     hass.services.register(DOMAIN, 'Refresh state from Wink', force_update)
 
     def pull_new_devices(call):
         """Pull new devices added to users Wink account since startup."""
-        _LOGGER.info("Getting new devices from Wink API.")
+        _LOGGER.info("Getting new devices from Wink API")
         for component in WINK_COMPONENTS:
             discovery.load_platform(hass, component, DOMAIN, {}, config)
     hass.services.register(DOMAIN, 'Add new devices', pull_new_devices)
@@ -150,14 +150,14 @@ class WinkDevice(Entity):
             if message is None:
                 _LOGGER.error("Error on pubnub update for %s "
                               "polling API for current state", self.name)
-                self.update_ha_state(True)
+                self.schedule_update_ha_state(True)
             else:
                 self.wink.pubnub_update(message)
-                self.update_ha_state()
+                self.schedule_update_ha_state()
         except (ValueError, KeyError, AttributeError):
             _LOGGER.error("Error in pubnub JSON for %s "
                           "polling API for current state", self.name)
-            self.update_ha_state(True)
+            self.schedule_update_ha_state(True)
 
     @property
     def name(self):
@@ -166,7 +166,7 @@ class WinkDevice(Entity):
 
     @property
     def available(self):
-        """True if connection == True."""
+        """Return true if connection == True."""
         return self.wink.available()
 
     def update(self):

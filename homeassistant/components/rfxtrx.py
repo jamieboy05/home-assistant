@@ -14,9 +14,9 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers.entity import Entity
 from homeassistant.const import (ATTR_ENTITY_ID, TEMP_CELSIUS)
 
-REQUIREMENTS = ['pyRFXtrx==0.17.0']
+REQUIREMENTS = ['pyRFXtrx==0.18.0']
 
-DOMAIN = "rfxtrx"
+DOMAIN = 'rfxtrx'
 
 DEFAULT_SIGNAL_REPETITIONS = 1
 
@@ -126,10 +126,10 @@ CONFIG_SCHEMA = vol.Schema({
 
 
 def setup(hass, config):
-    """Setup the RFXtrx component."""
+    """Set up the RFXtrx component."""
     # Declare the Handle event
     def handle_receive(event):
-        """Callback all subscribers for RFXtrx gateway."""
+        """Handle revieved messgaes from RFXtrx gateway."""
         # Log RFXCOM event
         if not event.device.id_string:
             return
@@ -334,7 +334,7 @@ class RfxtrxDevice(Entity):
         """Update det state of the device."""
         self._state = state
         self._brightness = brightness
-        self.update_ha_state()
+        self.schedule_update_ha_state()
 
     def _send_command(self, command, brightness=0):
         if not self._event:
@@ -369,4 +369,4 @@ class RfxtrxDevice(Entity):
             for _ in range(self.signal_repetitions):
                 self._event.device.send_stop(RFXOBJECT.transport)
 
-        self.update_ha_state()
+        self.schedule_update_ha_state()

@@ -24,8 +24,6 @@ from homeassistant.helpers.config_validation import PLATFORM_SCHEMA  # noqa
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.restore_state import async_restore_state
 import homeassistant.util.color as color_util
-from homeassistant.util.async import run_callback_threadsafe
-
 
 DOMAIN = "light"
 SCAN_INTERVAL = timedelta(seconds=30)
@@ -52,6 +50,8 @@ ATTR_TRANSITION = "transition"
 ATTR_RGB_COLOR = "rgb_color"
 ATTR_XY_COLOR = "xy_color"
 ATTR_COLOR_TEMP = "color_temp"
+ATTR_MIN_MIREDS = "min_mireds"
+ATTR_MAX_MIREDS = "max_mireds"
 ATTR_COLOR_NAME = "color_name"
 ATTR_WHITE_VALUE = "white_value"
 
@@ -80,6 +80,8 @@ LIGHT_PROFILES_FILE = "light_profiles.csv"
 PROP_TO_ATTR = {
     'brightness': ATTR_BRIGHTNESS,
     'color_temp': ATTR_COLOR_TEMP,
+    'min_mireds': ATTR_MIN_MIREDS,
+    'max_mireds': ATTR_MAX_MIREDS,
     'rgb_color': ATTR_RGB_COLOR,
     'xy_color': ATTR_XY_COLOR,
     'white_value': ATTR_WHITE_VALUE,
@@ -88,7 +90,7 @@ PROP_TO_ATTR = {
 }
 
 # Service call validation schemas
-VALID_TRANSITION = vol.All(vol.Coerce(int), vol.Clamp(min=0, max=900))
+VALID_TRANSITION = vol.All(vol.Coerce(float), vol.Clamp(min=0, max=6553))
 VALID_BRIGHTNESS = vol.All(vol.Coerce(int), vol.Clamp(min=0, max=255))
 
 LIGHT_TURN_ON_SCHEMA = vol.Schema({
@@ -101,9 +103,7 @@ LIGHT_TURN_ON_SCHEMA = vol.Schema({
                             vol.Coerce(tuple)),
     ATTR_XY_COLOR: vol.All(vol.ExactSequence((cv.small_float, cv.small_float)),
                            vol.Coerce(tuple)),
-    ATTR_COLOR_TEMP: vol.All(vol.Coerce(int),
-                             vol.Range(min=color_util.HASS_COLOR_MIN,
-                                       max=color_util.HASS_COLOR_MAX)),
+    ATTR_COLOR_TEMP: vol.All(vol.Coerce(int), vol.Range(min=1)),
     ATTR_WHITE_VALUE: vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
     ATTR_FLASH: vol.In([FLASH_SHORT, FLASH_LONG]),
     ATTR_EFFECT: cv.string,
@@ -145,10 +145,10 @@ def turn_on(hass, entity_id=None, transition=None, brightness=None,
             rgb_color=None, xy_color=None, color_temp=None, white_value=None,
             profile=None, flash=None, effect=None, color_name=None):
     """Turn all or specified light on."""
-    run_callback_threadsafe(
-        hass.loop, async_turn_on, hass, entity_id, transition, brightness,
+    hass.add_job(
+        async_turn_on, hass, entity_id, transition, brightness,
         rgb_color, xy_color, color_temp, white_value,
-        profile, flash, effect, color_name).result()
+        profile, flash, effect, color_name)
 
 
 @callback
@@ -178,8 +178,7 @@ def async_turn_on(hass, entity_id=None, transition=None, brightness=None,
 
 def turn_off(hass, entity_id=None, transition=None):
     """Turn all or specified light off."""
-    run_callback_threadsafe(
-        hass.loop, async_turn_off, hass, entity_id, transition).result()
+    hass.add_job(async_turn_off, hass, entity_id, transition)
 
 
 @callback
@@ -258,7 +257,7 @@ def async_setup(hass, config):
             if not light.should_poll:
                 continue
 
-            update_coro = hass.loop.create_task(
+            update_coro = hass.async_add_job(
                 light.async_update_ha_state(True))
             if hasattr(light, 'async_update'):
                 update_tasks.append(update_coro)
@@ -339,6 +338,18 @@ class Light(ToggleEntity):
     def color_temp(self):
         """Return the CT color value in mireds."""
         return None
+
+    @property
+    def min_mireds(self):
+        """Return the coldest color_temp that this light supports."""
+        # Default to the Philips Hue value that HA has always assumed
+        return 154
+
+    @property
+    def max_mireds(self):
+        """Return the warmest color_temp that this light supports."""
+        # Default to the Philips Hue value that HA has always assumed
+        return 500
 
     @property
     def white_value(self):

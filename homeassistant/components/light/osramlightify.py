@@ -17,6 +17,8 @@ from homeassistant.components.light import (
     Light, ATTR_BRIGHTNESS, ATTR_COLOR_TEMP, ATTR_EFFECT, ATTR_RGB_COLOR,
     ATTR_TRANSITION, EFFECT_RANDOM, SUPPORT_BRIGHTNESS, SUPPORT_EFFECT,
     SUPPORT_COLOR_TEMP, SUPPORT_RGB_COLOR, SUPPORT_TRANSITION, PLATFORM_SCHEMA)
+from homeassistant.util.color import (
+    color_temperature_mired_to_kelvin, color_temperature_kelvin_to_mired)
 import homeassistant.helpers.config_validation as cv
 
 REQUIREMENTS = ['https://github.com/tfriedel/python-lightify/archive/'
@@ -24,10 +26,6 @@ REQUIREMENTS = ['https://github.com/tfriedel/python-lightify/archive/'
 
 _LOGGER = logging.getLogger(__name__)
 
-TEMP_MIN = 2000  # lightify minimum temperature
-TEMP_MAX = 6500  # lightify maximum temperature
-TEMP_MIN_HASS = 154  # home assistant minimum temperature
-TEMP_MAX_HASS = 500  # home assistant maximum temperature
 MIN_TIME_BETWEEN_SCANS = timedelta(seconds=10)
 MIN_TIME_BETWEEN_FORCED_SCANS = timedelta(milliseconds=100)
 
@@ -41,25 +39,25 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the Osram Lightify lights."""
+    """Set up the Osram Lightify lights."""
     import lightify
     host = config.get(CONF_HOST)
     if host:
         try:
             bridge = lightify.Lightify(host)
         except socket.error as err:
-            msg = 'Error connecting to bridge: {} due to: {}'.format(host,
-                                                                     str(err))
+            msg = "Error connecting to bridge: {} due to: {}".format(
+                host, str(err))
             _LOGGER.exception(msg)
             return False
         setup_bridge(bridge, add_devices)
     else:
-        _LOGGER.error('No host found in configuration')
+        _LOGGER.error("No host found in configuration")
         return False
 
 
 def setup_bridge(bridge, add_devices_callback):
-    """Setup the Lightify bridge."""
+    """Set up the Lightify bridge."""
     lights = {}
 
     @util.Throttle(MIN_TIME_BETWEEN_SCANS, MIN_TIME_BETWEEN_FORCED_SCANS)
@@ -93,10 +91,10 @@ class OsramLightifyLight(Light):
         self._light = light
         self._light_id = light_id
         self.update_lights = update_lights
-        self._brightness = 0
-        self._rgb = (0, 0, 0)
-        self._name = ""
-        self._temperature = TEMP_MIN
+        self._brightness = None
+        self._rgb = None
+        self._name = None
+        self._temperature = None
         self._state = False
         self.update()
 
@@ -107,8 +105,8 @@ class OsramLightifyLight(Light):
 
     @property
     def rgb_color(self):
-        """Last RGB color value set."""
-        _LOGGER.debug("rgb_color light state for light: %s is: %s %s %s ",
+        """Return the last RGB color value set."""
+        _LOGGER.debug("rgb_color light state for light: %s is: %s %s %s",
                       self._name, self._rgb[0], self._rgb[1], self._rgb[2])
         return self._rgb
 
@@ -119,16 +117,16 @@ class OsramLightifyLight(Light):
 
     @property
     def brightness(self):
-        """Brightness of this light between 0..255."""
-        _LOGGER.debug("brightness for light %s is: %s",
-                      self._name, self._brightness)
+        """Return the brightness of this light between 0..255."""
+        _LOGGER.debug(
+            "Brightness for light %s is: %s", self._name, self._brightness)
         return self._brightness
 
     @property
     def is_on(self):
         """Update Status to True if device is on."""
-        _LOGGER.debug("is_on light state for light: %s is: %s",
-                      self._name, self._state)
+        _LOGGER.debug(
+            "is_on light state for light: %s is: %s", self._name, self._state)
         return self._state
 
     @property
@@ -138,36 +136,31 @@ class OsramLightifyLight(Light):
 
     def turn_on(self, **kwargs):
         """Turn the device on."""
-        _LOGGER.debug("turn_on Attempting to turn on light: %s ",
-                      self._name)
+        _LOGGER.debug("turn_on Attempting to turn on light: %s ", self._name)
 
         self._light.set_onoff(1)
         self._state = self._light.on()
 
         if ATTR_TRANSITION in kwargs:
-            transition = kwargs[ATTR_TRANSITION] * 10
-            _LOGGER.debug("turn_on requested transition time for light:"
-                          " %s is: %s ",
-                          self._name, transition)
+            transition = int(kwargs[ATTR_TRANSITION] * 10)
+            _LOGGER.debug("turn_on requested transition time for light: "
+                          "%s is: %s", self._name, transition)
         else:
             transition = 0
-            _LOGGER.debug("turn_on requested transition time for light:"
-                          " %s is: %s ",
-                          self._name, transition)
+            _LOGGER.debug("turn_on requested transition time for light: "
+                          "%s is: %s", self._name, transition)
 
         if ATTR_RGB_COLOR in kwargs:
             red, green, blue = kwargs[ATTR_RGB_COLOR]
-            _LOGGER.debug("turn_on requested ATTR_RGB_COLOR for light:"
-                          " %s is: %s %s %s ",
-                          self._name, red, green, blue)
+            _LOGGER.debug("turn_on requested ATTR_RGB_COLOR for light: "
+                          "%s is: %s %s %s", self._name, red, green, blue)
             self._light.set_rgb(red, green, blue, transition)
 
         if ATTR_COLOR_TEMP in kwargs:
             color_t = kwargs[ATTR_COLOR_TEMP]
-            kelvin = int(((TEMP_MAX - TEMP_MIN) * (color_t - TEMP_MIN_HASS) /
-                          (TEMP_MAX_HASS - TEMP_MIN_HASS)) + TEMP_MIN)
-            _LOGGER.debug("turn_on requested set_temperature for light:"
-                          " %s: %s ", self._name, kelvin)
+            kelvin = int(color_temperature_mired_to_kelvin(color_t))
+            _LOGGER.debug("turn_on requested set_temperature for light: "
+                          "%s: %s", self._name, kelvin)
             self._light.set_temperature(kelvin, transition)
 
         if ATTR_BRIGHTNESS in kwargs:
@@ -185,9 +178,8 @@ class OsramLightifyLight(Light):
                                     random.randrange(0, 255),
                                     random.randrange(0, 255),
                                     transition)
-                _LOGGER.debug("turn_on requested random effect for light:"
-                              " %s with transition %s ",
-                              self._name, transition)
+                _LOGGER.debug("turn_on requested random effect for light: "
+                              "%s with transition %s", self._name, transition)
 
         self.schedule_update_ha_state()
 
@@ -196,16 +188,14 @@ class OsramLightifyLight(Light):
         _LOGGER.debug("turn_off Attempting to turn off light: %s ",
                       self._name)
         if ATTR_TRANSITION in kwargs:
-            transition = kwargs[ATTR_TRANSITION] * 10
-            _LOGGER.debug("turn_off requested transition time for light:"
-                          " %s is: %s ",
-                          self._name, transition)
+            transition = int(kwargs[ATTR_TRANSITION] * 10)
+            _LOGGER.debug("turn_off requested transition time for light: "
+                          "%s is: %s", self._name, transition)
             self._light.set_luminance(0, transition)
         else:
             transition = 0
-            _LOGGER.debug("turn_off requested transition time for light:"
-                          " %s is: %s ",
-                          self._name, transition)
+            _LOGGER.debug("turn_off requested transition time for light: "
+                          "%s is: %s ", self._name, transition)
             self._light.set_onoff(0)
             self._state = self._light.on()
 
@@ -218,6 +208,8 @@ class OsramLightifyLight(Light):
         self._name = self._light.name()
         self._rgb = self._light.rgb()
         o_temp = self._light.temp()
-        self._temperature = int(TEMP_MIN_HASS + (TEMP_MAX_HASS - TEMP_MIN_HASS)
-                                * (o_temp - TEMP_MIN) / (TEMP_MAX - TEMP_MIN))
+        if o_temp == 0:
+            self._temperature = None
+        else:
+            self._temperature = color_temperature_kelvin_to_mired(o_temp)
         self._state = self._light.on()

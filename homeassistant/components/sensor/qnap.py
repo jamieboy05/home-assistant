@@ -4,7 +4,6 @@ Support for QNAP NAS Sensors.
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/sensor.qnap/
 """
-
 import logging
 from datetime import timedelta
 
@@ -12,13 +11,13 @@ from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.helpers.entity import Entity
 from homeassistant.const import (
     CONF_HOST, CONF_USERNAME, CONF_PASSWORD, CONF_PORT, CONF_SSL,
-    CONF_VERIFY_SSL, CONF_MONITORED_CONDITIONS, TEMP_CELSIUS)
+    CONF_VERIFY_SSL, CONF_TIMEOUT, CONF_MONITORED_CONDITIONS, TEMP_CELSIUS)
 from homeassistant.util import Throttle
 import homeassistant.helpers.config_validation as cv
 
 import voluptuous as vol
 
-REQUIREMENTS = ['qnapstats==0.2.2']
+REQUIREMENTS = ['qnapstats==0.2.4']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,11 +43,16 @@ CONF_NICS = 'nics'
 CONF_VOLUMES = 'volumes'
 DEFAULT_NAME = 'QNAP'
 DEFAULT_PORT = 8080
+DEFAULT_TIMEOUT = 5
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(minutes=1)
 
-_HEALTH_MON_COND = {
+NOTIFICATION_ID = 'qnap_notification'
+NOTIFICATION_TITLE = 'QNAP Sensor Setup'
+
+_SYSTEM_MON_COND = {
     'status': ['Status', None, 'mdi:checkbox-marked-circle-outline'],
+    'system_temp': ['System Temperature', TEMP_CELSIUS, 'mdi:thermometer'],
 }
 _CPU_MON_COND = {
     'cpu_temp': ['CPU Temperature', TEMP_CELSIUS, 'mdi:thermometer'],
@@ -76,7 +80,7 @@ _VOLUME_MON_COND = {
     'volume_percentage_used': ['Volume Used', '%', 'mdi:chart-pie'],
 }
 
-_MONITORED_CONDITIONS = list(_HEALTH_MON_COND.keys()) + \
+_MONITORED_CONDITIONS = list(_SYSTEM_MON_COND.keys()) + \
                         list(_CPU_MON_COND.keys()) + \
                         list(_MEMORY_MON_COND.keys()) + \
                         list(_NETWORK_MON_COND.keys()) + \
@@ -88,6 +92,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_SSL, default=False): cv.boolean,
     vol.Optional(CONF_VERIFY_SSL, default=True): cv.boolean,
     vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
+    vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.positive_int,
     vol.Required(CONF_USERNAME): cv.string,
     vol.Required(CONF_PASSWORD): cv.string,
     vol.Optional(CONF_MONITORED_CONDITIONS):
@@ -100,23 +105,33 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 
 # pylint: disable=unused-argument
 def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the QNAP NAS sensor."""
+    """Set up the QNAP NAS sensor."""
     api = QNAPStatsAPI(config)
     api.update()
+
+    if not api.data:
+        import homeassistant.loader as loader
+        loader.get_component('persistent_notification').create(
+            hass, 'Error: Failed to set up QNAP sensor.<br />'
+                  'Check the logs for additional information. '
+                  'You will need to restart hass after fixing.',
+            title=NOTIFICATION_TITLE,
+            notification_id=NOTIFICATION_ID)
+        return False
 
     sensors = []
 
     # Basic sensors
     for variable in config[CONF_MONITORED_CONDITIONS]:
-        if variable in _HEALTH_MON_COND:
-            sensors.append(QNAPHealthStatus(api, variable,
-                                            _HEALTH_MON_COND[variable]))
+        if variable in _SYSTEM_MON_COND:
+            sensors.append(QNAPSystemSensor(
+                api, variable, _SYSTEM_MON_COND[variable]))
         if variable in _CPU_MON_COND:
-            sensors.append(QNAPCPUSensor(api, variable,
-                                         _CPU_MON_COND[variable]))
+            sensors.append(QNAPCPUSensor(
+                api, variable, _CPU_MON_COND[variable]))
         if variable in _MEMORY_MON_COND:
-            sensors.append(QNAPMemorySensor(api, variable,
-                                            _MEMORY_MON_COND[variable]))
+            sensors.append(QNAPMemorySensor(
+                api, variable, _MEMORY_MON_COND[variable]))
 
     # Network sensors
     nics = config[CONF_NICS]
@@ -177,7 +192,8 @@ class QNAPStatsAPI(object):
             config.get(CONF_PORT),
             config.get(CONF_USERNAME),
             config.get(CONF_PASSWORD),
-            verify_ssl=config.get(CONF_VERIFY_SSL)
+            verify_ssl=config.get(CONF_VERIFY_SSL),
+            timeout=config.get(CONF_TIMEOUT),
         )
 
         self.data = {}
@@ -193,7 +209,7 @@ class QNAPStatsAPI(object):
             self.data["volumes"] = self._api.get_volumes()
             self.data["bandwidth"] = self._api.get_bandwidth()
         except:
-            _LOGGER.exception("Failed to fetch QNAP stats from the NAS.")
+            _LOGGER.exception("Failed to fetch QNAP stats from the NAS")
 
 
 class QNAPSensor(Entity):
@@ -211,19 +227,17 @@ class QNAPSensor(Entity):
     @property
     def name(self):
         """Return the name of the sensor, if any."""
-        server_name = self._api.data["system_stats"]["system"]["name"]
+        server_name = self._api.data['system_stats']['system']['name']
 
         if self.monitor_device is not None:
-            return "{} {} ({})".format(server_name,
-                                       self.var_name,
-                                       self.monitor_device)
+            return "{} {} ({})".format(
+                server_name, self.var_name, self.monitor_device)
         else:
-            return "{} {}".format(server_name,
-                                  self.var_name)
+            return "{} {}".format(server_name, self.var_name)
 
     @property
     def icon(self):
-        """Icon to use in the frontend, if any."""
+        """Return the icon to use in the frontend, if any."""
         return self.var_icon
 
     @property
@@ -242,10 +256,10 @@ class QNAPCPUSensor(QNAPSensor):
     @property
     def state(self):
         """Return the state of the sensor."""
-        if self.var_id == "cpu_temp":
-            return self._api.data["system_stats"]["cpu"]["temp_c"]
-        elif self.var_id == "cpu_usage":
-            return self._api.data["system_stats"]["cpu"]["usage_percent"]
+        if self.var_id == 'cpu_temp':
+            return self._api.data['system_stats']['cpu']['temp_c']
+        elif self.var_id == 'cpu_usage':
+            return self._api.data['system_stats']['cpu']['usage_percent']
 
 
 class QNAPMemorySensor(QNAPSensor):
@@ -254,27 +268,27 @@ class QNAPMemorySensor(QNAPSensor):
     @property
     def state(self):
         """Return the state of the sensor."""
-        free = float(self._api.data["system_stats"]["memory"]["free"]) / 1024
-        if self.var_id == "memory_free":
+        free = float(self._api.data['system_stats']['memory']['free']) / 1024
+        if self.var_id == 'memory_free':
             return round_nicely(free)
 
-        total = float(self._api.data["system_stats"]["memory"]["total"]) / 1024
+        total = float(self._api.data['system_stats']['memory']['total']) / 1024
 
         used = total - free
-        if self.var_id == "memory_used":
+        if self.var_id == 'memory_used':
             return round_nicely(used)
 
-        if self.var_id == "memory_percent_used":
+        if self.var_id == 'memory_percent_used':
             return round(used / total * 100)
 
     @property
     def device_state_attributes(self):
         """Return the state attributes."""
         if self._api.data:
-            data = self._api.data["system_stats"]["memory"]
-            size = round_nicely(float(data["total"]) / 1024)
+            data = self._api.data['system_stats']['memory']
+            size = round_nicely(float(data['total']) / 1024)
             return {
-                ATTR_MEMORY_SIZE: "{} GB".format(size),
+                ATTR_MEMORY_SIZE: '{} GB'.format(size),
             }
 
 
@@ -284,57 +298,60 @@ class QNAPNetworkSensor(QNAPSensor):
     @property
     def state(self):
         """Return the state of the sensor."""
-        if self.var_id == "network_link_status":
-            nic = self._api.data["system_stats"]["nics"][self.monitor_device]
-            return nic["link_status"]
+        if self.var_id == 'network_link_status':
+            nic = self._api.data['system_stats']['nics'][self.monitor_device]
+            return nic['link_status']
 
-        data = self._api.data["bandwidth"][self.monitor_device]
-        if self.var_id == "network_tx":
-            return round_nicely(data["tx"] / 1024 / 1024)
+        data = self._api.data['bandwidth'][self.monitor_device]
+        if self.var_id == 'network_tx':
+            return round_nicely(data['tx'] / 1024 / 1024)
 
-        if self.var_id == "network_rx":
-            return round_nicely(data["rx"] / 1024 / 1024)
+        if self.var_id == 'network_rx':
+            return round_nicely(data['rx'] / 1024 / 1024)
 
     @property
     def device_state_attributes(self):
         """Return the state attributes."""
         if self._api.data:
-            data = self._api.data["system_stats"]["nics"][self.monitor_device]
+            data = self._api.data['system_stats']['nics'][self.monitor_device]
             return {
-                ATTR_IP: data["ip"],
-                ATTR_MASK: data["mask"],
-                ATTR_MAC: data["mac"],
-                ATTR_MAX_SPEED: data["max_speed"],
-                ATTR_PACKETS_TX: data["tx_packets"],
-                ATTR_PACKETS_RX: data["rx_packets"],
-                ATTR_PACKETS_ERR: data["err_packets"]
+                ATTR_IP: data['ip'],
+                ATTR_MASK: data['mask'],
+                ATTR_MAC: data['mac'],
+                ATTR_MAX_SPEED: data['max_speed'],
+                ATTR_PACKETS_TX: data['tx_packets'],
+                ATTR_PACKETS_RX: data['rx_packets'],
+                ATTR_PACKETS_ERR: data['err_packets']
             }
 
 
-class QNAPHealthStatus(QNAPSensor):
+class QNAPSystemSensor(QNAPSensor):
     """A QNAP sensor that monitors overall system health."""
 
     @property
     def state(self):
         """Return the state of the sensor."""
-        return self._api.data["system_health"]
+        if self.var_id == 'status':
+            return self._api.data['system_health']
+
+        if self.var_id == 'system_temp':
+            return int(self._api.data['system_stats']['system']['temp_c'])
 
     @property
     def device_state_attributes(self):
         """Return the state attributes."""
         if self._api.data:
-            data = self._api.data["system_stats"]
-            days = int(data["uptime"]["days"])
-            hours = int(data["uptime"]["hours"])
-            minutes = int(data["uptime"]["minutes"])
+            data = self._api.data['system_stats']
+            days = int(data['uptime']['days'])
+            hours = int(data['uptime']['hours'])
+            minutes = int(data['uptime']['minutes'])
 
             return {
-                ATTR_NAME: data["system"]["name"],
-                ATTR_MODEL: data["system"]["model"],
-                ATTR_SERIAL: data["system"]["serial_number"],
-                ATTR_UPTIME: "{:0>2d}d {:0>2d}h {:0>2d}m".format(days,
-                                                                 hours,
-                                                                 minutes)
+                ATTR_NAME: data['system']['name'],
+                ATTR_MODEL: data['system']['model'],
+                ATTR_SERIAL: data['system']['serial_number'],
+                ATTR_UPTIME: '{:0>2d}d {:0>2d}h {:0>2d}m'.format(
+                    days, hours, minutes)
             }
 
 
@@ -344,18 +361,18 @@ class QNAPDriveSensor(QNAPSensor):
     @property
     def state(self):
         """Return the state of the sensor."""
-        data = self._api.data["smart_drive_health"][self.monitor_device]
+        data = self._api.data['smart_drive_health'][self.monitor_device]
 
-        if self.var_id == "drive_smart_status":
-            return data["health"]
+        if self.var_id == 'drive_smart_status':
+            return data['health']
 
-        if self.var_id == "drive_temp":
-            return int(data["temp_c"])
+        if self.var_id == 'drive_temp':
+            return int(data['temp_c'])
 
     @property
     def name(self):
         """Return the name of the sensor, if any."""
-        server_name = self._api.data["system_stats"]["system"]["name"]
+        server_name = self._api.data['system_stats']['system']['name']
 
         return "{} {} (Drive {})".format(
             server_name,
@@ -367,12 +384,12 @@ class QNAPDriveSensor(QNAPSensor):
     def device_state_attributes(self):
         """Return the state attributes."""
         if self._api.data:
-            data = self._api.data["smart_drive_health"][self.monitor_device]
+            data = self._api.data['smart_drive_health'][self.monitor_device]
             return {
-                ATTR_DRIVE: data["drive_number"],
-                ATTR_MODEL: data["model"],
-                ATTR_SERIAL: data["serial"],
-                ATTR_TYPE: data["type"],
+                ATTR_DRIVE: data['drive_number'],
+                ATTR_MODEL: data['model'],
+                ATTR_SERIAL: data['serial'],
+                ATTR_TYPE: data['type'],
             }
 
 
@@ -382,27 +399,27 @@ class QNAPVolumeSensor(QNAPSensor):
     @property
     def state(self):
         """Return the state of the sensor."""
-        data = self._api.data["volumes"][self.monitor_device]
+        data = self._api.data['volumes'][self.monitor_device]
 
-        free_gb = int(data["free_size"]) / 1024 / 1024 / 1024
-        if self.var_id == "volume_size_free":
+        free_gb = int(data['free_size']) / 1024 / 1024 / 1024
+        if self.var_id == 'volume_size_free':
             return round_nicely(free_gb)
 
-        total_gb = int(data["total_size"]) / 1024 / 1024 / 1024
+        total_gb = int(data['total_size']) / 1024 / 1024 / 1024
 
         used_gb = total_gb - free_gb
-        if self.var_id == "volume_size_used":
+        if self.var_id == 'volume_size_used':
             return round_nicely(used_gb)
 
-        if self.var_id == "volume_percentage_used":
+        if self.var_id == 'volume_percentage_used':
             return round(used_gb / total_gb * 100)
 
     @property
     def device_state_attributes(self):
         """Return the state attributes."""
         if self._api.data:
-            data = self._api.data["volumes"][self.monitor_device]
-            total_gb = int(data["total_size"]) / 1024 / 1024 / 1024
+            data = self._api.data['volumes'][self.monitor_device]
+            total_gb = int(data['total_size']) / 1024 / 1024 / 1024
 
             return {
                 ATTR_VOLUME_SIZE: "{} GB".format(round_nicely(total_gb)),

@@ -68,10 +68,10 @@ SENSOR_TYPES = {
     'weather': ['Weather Summary', None],
     'wind_degrees': ['Wind Degrees', None],
     'wind_dir': ['Wind Direction', None],
-    'wind_gust_kph': ['Wind Gust', 'kpH'],
-    'wind_gust_mph': ['Wind Gust', 'mpH'],
-    'wind_kph': ['Wind Speed', 'kpH'],
-    'wind_mph': ['Wind Speed', 'mpH'],
+    'wind_gust_kph': ['Wind Gust', 'kph'],
+    'wind_gust_mph': ['Wind Gust', 'mph'],
+    'wind_kph': ['Wind Speed', 'kph'],
+    'wind_mph': ['Wind Speed', 'mph'],
     'wind_string': ['Wind Summary', None],
 }
 
@@ -112,11 +112,10 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the WUnderground sensor."""
-    rest = WUndergroundData(hass,
-                            config.get(CONF_API_KEY),
-                            config.get(CONF_PWS_ID),
-                            config.get(CONF_LANG))
+    """Set up the WUnderground sensor."""
+    rest = WUndergroundData(
+        hass, config.get(CONF_API_KEY), config.get(CONF_PWS_ID),
+        config.get(CONF_LANG))
     sensors = []
     for variable in config[CONF_MONITORED_CONDITIONS]:
         sensors.append(WUndergroundSensor(rest, variable))
